@@ -9,8 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const nodeVersion = "22.19.0";
-const compiler = "x86_64-w64-mingw32-g++";
-const cache = join(homedir(), ".cache", "rea-windows-native");
+const windows = process.platform === "win32";
+const compiler = windows
+  ? "x86_64-w64-mingw32-clang++.exe"
+  : "x86_64-w64-mingw32-g++";
+const cache = windows
+  ? join(root, ".cache", "windows-native-build")
+  : join(homedir(), ".cache", "rea-windows-native");
 const inspectionFixture = process.argv[2] === "--inspection-fixture";
 if (process.argv.length > 3 || (process.argv.length > 2 && !inspectionFixture))
   throw new Error("Unknown Windows native build argument");
@@ -23,6 +28,7 @@ const run = (command, args) => {
     encoding: "utf8",
     maxBuffer: 4 * 1_024 * 1_024,
     timeout: 120_000,
+    windowsHide: true,
   });
   if (result.error !== undefined)
     throw new Error(
@@ -34,9 +40,9 @@ const run = (command, args) => {
     );
   return result.stdout;
 };
-if (process.platform !== "linux")
+if (process.platform !== "linux" && !(windows && process.arch === "x64"))
   throw new Error(
-    "The Windows x64 artifact build lane currently requires Linux and MinGW-w64.",
+    "The Windows x64 artifact build lane requires Linux with MinGW-w64 or Windows x64 with LLVM-MinGW.",
   );
 run(compiler, ["--version"]);
 await mkdir(cache, { recursive: true });
@@ -89,8 +95,9 @@ if (!(await exists(join(headers, "node_api.h")))) {
 }
 const artifact = "rea-windows-x64.node";
 // MSVC short-import libraries do not produce a correct Node import table with
-// GNU ld. Generate a GNU delay-import library for the exact stable Node-API
-// symbols; addon.cc binds it to the host executable, whatever its file name.
+// GNU ld. GNU dlltool generates delay-import stubs; LLVM dlltool generates an
+// import library and LLD marks node.exe for delay loading. Both paths preserve
+// addon.cc's hook that binds Node-API to the host executable, whatever its name.
 const sources = ["addon.cc", "filesystem.cc", "process.cc"];
 const sourceText = (
   await Promise.all(
@@ -112,7 +119,16 @@ await writeFile(
   definition,
   `LIBRARY node.exe\nEXPORTS\n${symbols.join("\n")}\n`,
 );
-run("x86_64-w64-mingw32-dlltool", ["-d", definition, "-y", library]);
+if (windows)
+  run("llvm-dlltool.exe", [
+    "-m",
+    "i386:x86-64",
+    "-d",
+    definition,
+    "-l",
+    library,
+  ]);
+else run("x86_64-w64-mingw32-dlltool", ["-d", definition, "-y", library]);
 run(compiler, [
   "-std=c++17",
   "-O2",
@@ -120,9 +136,9 @@ run(compiler, [
   "-D_WIN32_WINNT=0x0A00",
   "-shared",
   "-static",
-  "-static-libgcc",
-  "-static-libstdc++",
+  ...(windows ? [] : ["-static-libgcc", "-static-libstdc++"]),
   "-Wl,--no-insert-timestamp",
+  ...(windows ? ["-Wl,--delayload=node.exe"] : []),
   `-I${headers}`,
   "native/windows/src/addon.cc",
   inspectionFixture
@@ -130,6 +146,7 @@ run(compiler, [
     : "native/windows/src/filesystem.cc",
   "native/windows/src/process.cc",
   library,
+  ...(windows ? ["-ldelayimp"] : []),
   "-ladvapi32",
   "-lbcrypt",
   "-lntdll",

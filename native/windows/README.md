@@ -10,8 +10,11 @@ There is no environment override for loading an arbitrary native module.
 
 ## Build
 
-The artifact lane requires Linux, MinGW-w64 `x86_64-w64-mingw32-g++`,
-`x86_64-w64-mingw32-dlltool`, and `tar`. It never installs these commands.
+The artifact lane supports Linux with MinGW-w64 `x86_64-w64-mingw32-g++`
+and `x86_64-w64-mingw32-dlltool`, or Windows x64 with
+[LLVM-MinGW](https://github.com/mstorsjo/llvm-mingw/releases)
+`x86_64-w64-mingw32-clang++.exe` and `llvm-dlltool.exe`. Both hosts need `tar`
+and a C++17-capable toolchain. The build never installs these commands.
 Node-API headers are reused from the build cache or downloaded from the
 pinned official Node release with its published SHA-256 checked.
 
@@ -20,6 +23,23 @@ npm run build:windows-native
 npm run verify:windows-native:artifact
 npm pack
 ```
+
+On Windows, extract an LLVM-MinGW UCRT x64 release and put its `bin` directory
+on the current shell's `PATH` before running the same commands:
+
+```powershell
+$env:PATH = "C:\tools\llvm-mingw\bin;$env:PATH"
+npm run build:windows-native
+npm run verify:windows-native:artifact
+npm run verify:windows-native
+```
+
+Windows build prerequisites are cached in `.cache/windows-native-build/`.
+The Windows lane links the C++ runtime statically and asks LLD to delay-load
+the Node-API import library. The existing host-resolution hook therefore also
+works when the host executable is renamed. The native verifier exercises that
+case as well as runtime cleanup; a matching manifest alone does not establish
+that these controls work. Close processes using the addon before rebuilding it.
 
 `build/` is ignored by Git. The npm file inventory includes only the addon and
 its manifest. Release CI builds both, and `prepublishOnly` rejects a missing,
@@ -47,7 +67,9 @@ cp package/native/windows/build/rea-windows-x64.node native/windows/build/
 ```
 
 This is a manual recovery step. REA does not fetch or install the artifact
-automatically. Alternatively, build it using the Linux/MinGW lane above.
+automatically. Alternatively, build it using either native build lane above.
+For a checkout with unreleased native-source changes, rebuild from that source;
+a release's matching version and checksum do not attest those later changes.
 
 ## Boundaries
 

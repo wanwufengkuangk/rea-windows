@@ -46,6 +46,9 @@
   },
   "packageManager": "npm@11.16.0",
   "files": [
+    "WINDOWS.md",
+    "rea-windows.cmd",
+    "rea-windows.ps1",
     "dist",
     "install.sh",
     "bridge/hopper_bridge.py",
